@@ -3,9 +3,8 @@ from __future__ import annotations
 import os
 from typing import TypedDict
 
-from dotenv import load_dotenv
 from langgraph.graph import END, StateGraph
-from openai import OpenAI
+from openai import AsyncOpenAI
 
 
 class NovelState(TypedDict, total=False):
@@ -24,7 +23,7 @@ SYSTEM_STYLE = (
 )
 
 
-def build_client() -> OpenAI:
+def build_client() -> AsyncOpenAI:
     api_key = os.getenv("OPENAI_API_KEY", "").strip()
     if not api_key:
         raise RuntimeError("OPENAI_API_KEY is not set.")
@@ -34,12 +33,12 @@ def build_client() -> OpenAI:
     if base_url:
         kwargs["base_url"] = base_url
 
-    return OpenAI(**kwargs)
+    return AsyncOpenAI(**kwargs)
 
 
-def call_model(client: OpenAI, role: str, task: str, premise: str) -> str:
+async def call_model(client: AsyncOpenAI, role: str, task: str, premise: str) -> str:
     model = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
-    response = client.chat.completions.create(
+    response = await client.chat.completions.create(
         model=model,
         temperature=0.7,
         messages=[
@@ -57,46 +56,57 @@ def call_model(client: OpenAI, role: str, task: str, premise: str) -> str:
     return response.choices[0].message.content.strip()
 
 
-def manager(state: NovelState) -> NovelState:
+async def manager(state: NovelState) -> NovelState:
+    print("[Manager] Planning started...")
     client = build_client()
-    return {
-        "manager_notes": call_model(
-            client,
-            role="manager",
-            premise=state["premise"],
-            task="Create a short story plan with genre, tone, stakes, and a 3-beat outline.",
-        )
-    }
+    notes = await call_model(
+        client,
+        role="manager",
+        premise=state["premise"],
+        task="Create a short story plan with genre, tone, stakes, and a 3-beat outline.",
+    )
+    print("[Manager] Planning complete!")
+    return {"manager_notes": notes}
 
 
-def director(state: NovelState) -> NovelState:
+async def director(state: NovelState) -> NovelState:
+    print("[Director] Direction started...")
     client = build_client()
     task = (
         "Using the manager notes below, produce scene direction for one short scene.\n\n"
         f"Manager notes:\n{state['manager_notes']}"
     )
-    return {"director_notes": call_model(client, "director", task, state["premise"])}
+    notes = await call_model(client, "director", task, state["premise"])
+    print("[Director] Direction complete!")
+    return {"director_notes": notes}
 
 
-def character_a(state: NovelState) -> NovelState:
+async def character_a(state: NovelState) -> NovelState:
+    print("[Character A] Notes started...")
     client = build_client()
     task = (
         "Write Character A's motivation, fear, and one memorable line for the scene.\n\n"
         f"Director notes:\n{state['director_notes']}"
     )
-    return {"character_a_notes": call_model(client, "character_a", task, state["premise"])}
+    notes = await call_model(client, "character_a", task, state["premise"])
+    print("[Character A] Notes complete!")
+    return {"character_a_notes": notes}
 
 
-def character_b(state: NovelState) -> NovelState:
+async def character_b(state: NovelState) -> NovelState:
+    print("[Character B] Notes started...")
     client = build_client()
     task = (
         "Write Character B's motivation, conflict, and one memorable line for the scene.\n\n"
         f"Director notes:\n{state['director_notes']}"
     )
-    return {"character_b_notes": call_model(client, "character_b", task, state["premise"])}
+    notes = await call_model(client, "character_b", task, state["premise"])
+    print("[Character B] Notes complete!")
+    return {"character_b_notes": notes}
 
 
-def writer(state: NovelState) -> NovelState:
+async def writer(state: NovelState) -> NovelState:
+    print("[Writer] Drafting started...")
     client = build_client()
     task = (
         "Draft one short scene (300-500 words) using all notes below.\n\n"
@@ -105,16 +115,21 @@ def writer(state: NovelState) -> NovelState:
         f"Character A:\n{state['character_a_notes']}\n\n"
         f"Character B:\n{state['character_b_notes']}"
     )
-    return {"draft": call_model(client, "writer", task, state["premise"])}
+    notes = await call_model(client, "writer", task, state["premise"])
+    print("[Writer] Drafting complete!")
+    return {"draft": notes}
 
 
-def auditor(state: NovelState) -> NovelState:
+async def auditor(state: NovelState) -> NovelState:
+    print("[Auditor] Review started...")
     client = build_client()
     task = (
         "Review the draft. Give 3 bullets: what works, what is weak, and the next revision idea.\n\n"
         f"Draft:\n{state['draft']}"
     )
-    return {"audit": call_model(client, "auditor", task, state["premise"])}
+    notes = await call_model(client, "auditor", task, state["premise"])
+    print("[Auditor] Review complete!")
+    return {"audit": notes}
 
 
 def build_graph():
@@ -136,34 +151,3 @@ def build_graph():
     graph.add_edge("auditor", END)
 
     return graph.compile()
-
-
-def main() -> None:
-    load_dotenv()
-
-    premise = os.getenv(
-        "NOVEL_PREMISE",
-        "Two rival archivists must cooperate to decode a living library before it erases their memories.",
-    )
-
-    app = build_graph()
-    result = app.invoke({"premise": premise})
-
-    print("=== Premise ===")
-    print(result["premise"])
-    print("\n=== Manager ===")
-    print(result["manager_notes"])
-    print("\n=== Director ===")
-    print(result["director_notes"])
-    print("\n=== Character A ===")
-    print(result["character_a_notes"])
-    print("\n=== Character B ===")
-    print(result["character_b_notes"])
-    print("\n=== Draft ===")
-    print(result["draft"])
-    print("\n=== Audit ===")
-    print(result["audit"])
-
-
-if __name__ == "__main__":
-    main()
