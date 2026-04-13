@@ -87,7 +87,7 @@ async def call_model(client: AsyncOpenAI, role: str, task: str, premise: str) ->
     model = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
     response = await client.chat.completions.create(
         model=model,
-        temperature=0.8,
+        temperature=1,
         messages=[
             {"role": "system", "content": f"{SYSTEM_STYLE} 현재 역할은 {role}입니다."},
             {
