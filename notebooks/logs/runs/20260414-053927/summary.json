@@ -1,0 +1,125 @@
+{
+  "saved_at": "2026-04-14T05:39:27",
+  "provider": "openai",
+  "model": "gpt-4o-mini",
+  "base_url": "https://api.openai.com/v1",
+  "total_elapsed_ms": 61731,
+  "total_elapsed_sec": 61.731,
+  "llm_call_count": 12,
+  "llm_calls": [
+    {
+      "ts": "2026-04-14T05:38:31",
+      "role": "manager",
+      "provider": "openai",
+      "model": "gpt-4o-mini",
+      "elapsed_ms": 4726,
+      "output_chars": 333,
+      "finish_reason": "stop"
+    },
+    {
+      "ts": "2026-04-14T05:38:36",
+      "role": "director",
+      "provider": "openai",
+      "model": "gpt-4o-mini",
+      "elapsed_ms": 4882,
+      "output_chars": 319,
+      "finish_reason": "stop"
+    },
+    {
+      "ts": "2026-04-14T05:38:37",
+      "role": "character_a",
+      "provider": "openai",
+      "model": "gpt-4o-mini",
+      "elapsed_ms": 1196,
+      "output_chars": 86,
+      "finish_reason": "stop"
+    },
+    {
+      "ts": "2026-04-14T05:38:39",
+      "role": "character_b",
+      "provider": "openai",
+      "model": "gpt-4o-mini",
+      "elapsed_ms": 1732,
+      "output_chars": 73,
+      "finish_reason": "stop"
+    },
+    {
+      "ts": "2026-04-14T05:38:41",
+      "role": "character_a",
+      "provider": "openai",
+      "model": "gpt-4o-mini",
+      "elapsed_ms": 1551,
+      "output_chars": 113,
+      "finish_reason": "stop"
+    },
+    {
+      "ts": "2026-04-14T05:38:43",
+      "role": "character_b",
+      "provider": "openai",
+      "model": "gpt-4o-mini",
+      "elapsed_ms": 1206,
+      "output_chars": 101,
+      "finish_reason": "stop"
+    },
+    {
+      "ts": "2026-04-14T05:38:46",
+      "role": "character_a",
+      "provider": "openai",
+      "model": "gpt-4o-mini",
+      "elapsed_ms": 2954,
+      "output_chars": 137,
+      "finish_reason": "stop"
+    },
+    {
+      "ts": "2026-04-14T05:38:50",
+      "role": "character_b",
+      "provider": "openai",
+      "model": "gpt-4o-mini",
+      "elapsed_ms": 4178,
+      "output_chars": 120,
+      "finish_reason": "stop"
+    },
+    {
+      "ts": "2026-04-14T05:39:07",
+      "role": "writer",
+      "provider": "openai",
+      "model": "gpt-4o-mini",
+      "elapsed_ms": 16104,
+      "output_chars": 1438,
+      "finish_reason": "stop"
+    },
+    {
+      "ts": "2026-04-14T05:39:09",
+      "role": "auditor",
+      "provider": "openai",
+      "model": "gpt-4o-mini",
+      "elapsed_ms": 2460,
+      "output_chars": 203,
+      "finish_reason": "stop"
+    },
+    {
+      "ts": "2026-04-14T05:39:25",
+      "role": "writer",
+      "provider": "openai",
+      "model": "gpt-4o-mini",
+      "elapsed_ms": 15151,
+      "output_chars": 1449,
+      "finish_reason": "stop"
+    },
+    {
+      "ts": "2026-04-14T05:39:27",
+      "role": "auditor",
+      "provider": "openai",
+      "model": "gpt-4o-mini",
+      "elapsed_ms": 2179,
+      "output_chars": 177,
+      "finish_reason": "stop"
+    }
+  ],
+  "final_status": {
+    "turns": 6,
+    "revision_count": 1,
+    "audit_status": "pass",
+    "audit_target": "end"
+  }
+}
