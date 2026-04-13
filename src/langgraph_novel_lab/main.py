@@ -110,6 +110,11 @@ def parse_tagged_value(text: str, label: str) -> str:
     return match.group(1).strip() if match else ""
 
 
+def strip_speaker_prefix(text: str) -> str:
+    cleaned = " ".join(text.split()).strip()
+    return re.sub(r"^[^:：]+:\s*", "", cleaned)
+
+
 def parse_audit_result(audit: str) -> tuple[str, str]:
     status_raw = parse_tagged_value(audit, "판정").lower()
     target_raw = parse_tagged_value(audit, "되돌아갈_노드").lower()
@@ -129,6 +134,44 @@ def parse_audit_result(audit: str) -> tuple[str, str]:
         target = "end"
 
     return status, target
+
+
+def extract_audit_sections(audit: str) -> dict[str, str]:
+    return {
+        "강점": parse_tagged_value(audit, "강점") or "(없음)",
+        "약한_지점": parse_tagged_value(audit, "약한_지점") or "(없음)",
+        "보강_포인트": parse_tagged_value(audit, "보강_포인트") or "(없음)",
+        "수정_지시": parse_tagged_value(audit, "수정_지시") or "(없음)",
+    }
+
+
+def should_force_revision(draft: str, dialogue_history: list[str]) -> str | None:
+    text = " ".join(draft.split()).strip()
+    if len(text) < 350:
+        return "초안 분량이 너무 짧습니다."
+
+    normalized_draft = " ".join(text.lower().split())
+    copied_lines = 0
+    for line in dialogue_history:
+        normalized_line = strip_speaker_prefix(line).lower()
+        normalized_line = " ".join(normalized_line.split())
+        if len(normalized_line) >= 12 and normalized_line in normalized_draft:
+            copied_lines += 1
+
+    if dialogue_history and copied_lines >= max(3, len(dialogue_history) // 2):
+        return "대화 기록을 너무 많이 그대로 옮겼습니다."
+
+    scene_terms = ("리더", "악령", "공연", "무대", "팀")
+    tension_terms = ("긴장", "압박", "충돌", "갈등")
+
+    scene_hits = sum(term in text for term in scene_terms)
+    if scene_hits < 3:
+        return "장면의 핵심 요소가 충분히 드러나지 않았습니다."
+
+    if not any(term in text for term in tension_terms):
+        return "갈등이나 압박이 충분히 선명하지 않습니다."
+
+    return None
 
 
 def choose_next_node(state: StageState) -> NodeName:
@@ -238,16 +281,22 @@ async def writer(state: StageState) -> StageState:
     history_text = "\n".join(state.get("dialogue_history", []))
     revision_note = ""
     if state.get("revision_count", 0) > 0 and state.get("audit"):
+        sections = extract_audit_sections(state["audit"])
         revision_note = (
-            "\n\n이전 감수에서 아래와 같은 수정 요청이 왔습니다."
-            " 반드시 약점 보완에 집중해 초안을 다시 쓰세요.\n"
-            f"감수 의견:\n{state['audit']}"
+            "\n\n재작성 모드입니다. 아래 감수 결과를 반드시 반영해 초안을 새로 써야 합니다.\n"
+            f"- 강점: {sections['강점']}\n"
+            f"- 약한_지점: {sections['약한_지점']}\n"
+            f"- 보강_포인트: {sections['보강_포인트']}\n"
+            f"- 수정_지시: {sections['수정_지시']}\n\n"
+            "기존 문장을 조금 다듬는 수준이 아니라, 장면의 압력과 응답을 다시 설계하세요."
         )
     task = (
         "위 메모와 대화를 바탕으로 한국어 장면 초안을 작성하세요.\n"
         "분량은 대략 500~900자로 하며, 대사를 충분히 살리고 서술도 자연스럽게 이어 주세요.\n"
         "K-팝 데몬 헌터라는 현재 전제는 유지하고, 두 리더 사이의 긴장과 팀 전체의 부담이 동시에 느껴지게 쓰세요.\n"
-        "특히 반복적인 말주고받기만 늘어놓지 말고, 감정 변화나 상황 압박이 한 단계 더 움직이는 장면으로 만드세요.\n\n"
+        "특히 반복적인 말주고받기만 늘어놓지 말고, 감정 변화나 상황 압박이 한 단계 더 움직이는 장면으로 만드세요.\n"
+        "현재 대화 기록을 그대로 복붙하지 말고, 장면 서술과 대사의 비율을 새로 설계하세요.\n"
+        "가능하면 행동, 시선, 공간 압박 같은 구체적 묘사를 함께 넣어서 문단형 장면으로 완성하세요.\n\n"
         f"매니저 메모:\n{state['manager_notes']}\n\n"
         f"연출 메모:\n{state['director_notes']}\n\n"
         f"대화 기록:\n{history_text}"
@@ -282,6 +331,12 @@ async def auditor(state: StageState) -> StageState:
     )
     audit = await call_model(client, "auditor", task, state["premise"])
     audit_status, audit_target = parse_audit_result(audit)
+    heuristic_reason = should_force_revision(state["draft"], state.get("dialogue_history", []))
+
+    if audit_status == "pass" and heuristic_reason and revision_count < max_revisions:
+        audit_status = "revise"
+        audit_target = "writer"
+        audit = f"{audit}\n자동_보정: {heuristic_reason}"
 
     if audit_status == "revise" and revision_count < max_revisions:
         next_node = audit_target if audit_target in {"manager", "writer"} else "writer"
