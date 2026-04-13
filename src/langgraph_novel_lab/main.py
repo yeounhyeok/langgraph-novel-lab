@@ -9,21 +9,31 @@ from langgraph.graph import END, StateGraph
 from openai import AsyncOpenAI
 
 
-NodeName = Literal["director", "character_a", "character_b", "writer", "auditor", "end"]
+NodeName = Literal[
+    "manager",
+    "director",
+    "character_a",
+    "character_b",
+    "writer",
+    "auditor",
+    "end",
+]
 
 
 class StageState(TypedDict, total=False):
     premise: str
-    scene_notes: str
+    manager_notes: str
+    director_notes: str
     dialogue_history: list[str]
     draft: str
     audit: str
     next_node: NodeName
+    turns: int
 
 
 SYSTEM_STYLE = (
-    "You are part of a tiny educational multi-agent stage-play demo. "
-    "Be concise, concrete, and collaborative."
+    "You are part of a tiny educational LangGraph multi-agent demo. "
+    "Be concise, concrete, collaborative, and easy to follow."
 )
 
 
@@ -57,30 +67,29 @@ async def call_model(client: AsyncOpenAI, role: str, task: str, premise: str) ->
             },
         ],
     )
-    return response.choices[0].message.content.strip()
+    return (response.choices[0].message.content or "").strip()
 
 
-def _target_turns() -> int:
-    raw = os.getenv("TARGET_DIALOGUE_TURNS", "6").strip()
+def target_turns() -> int:
+    raw = os.getenv("TARGET_DIALOGUE_TURNS", "4").strip()
     try:
         return max(2, int(raw))
     except ValueError:
-        return 6
+        return 4
 
 
-def _choose_next_node(state: StageState) -> NodeName:
-    dialogue_history = state.get("dialogue_history", [])
-    if not state.get("scene_notes"):
+def choose_next_node(state: StageState) -> NodeName:
+    turns = state.get("turns", 0)
+    history = state.get("dialogue_history", [])
+
+    if not state.get("manager_notes"):
+        return "manager"
+    if not state.get("director_notes"):
         return "director"
-
-    if len(dialogue_history) < _target_turns():
-        if not dialogue_history:
+    if turns < target_turns():
+        if not history or history[-1].startswith("Character B:"):
             return "character_a"
-        last_line = dialogue_history[-1]
-        if last_line.startswith("Character A:"):
-            return "character_b"
-        return "character_a"
-
+        return "character_b"
     if not state.get("draft"):
         return "writer"
     if not state.get("audit"):
@@ -89,93 +98,94 @@ def _choose_next_node(state: StageState) -> NodeName:
 
 
 async def manager(state: StageState) -> StageState:
-    print("[Manager] Routing started...")
-    next_node = _choose_next_node(state)
-    print(f"[Manager] Routing complete! next_node={next_node}")
-    return {"next_node": next_node}
+    client = build_client()
+    history_text = "\n".join(state.get("dialogue_history", [])) or "(No dialogue yet)"
+    task = (
+        "Create a short plan for one scene. Give 3 bullets for tone, stakes, and desired character friction. "
+        "This plan should guide the rest of the graph.\n\n"
+        f"Dialogue so far:\n{history_text}"
+    )
+    notes = await call_model(client, "manager", task, state["premise"])
+    next_node = "director"
+    print(f"[manager] next_node={next_node}")
+    return {"manager_notes": notes, "next_node": next_node}
 
 
 async def director(state: StageState) -> StageState:
-    print("[Director] Scene setup started...")
     client = build_client()
     task = (
-        "Set stage direction for a short play scene.\n"
-        "Return 3 concise bullets: place, mood, immediate conflict.\n\n"
-        f"Premise:\n{state['premise']}"
+        "Write compact stage direction for the scene. Give 3 bullets: setting, mood, and immediate pressure.\n\n"
+        f"Manager notes:\n{state['manager_notes']}"
     )
-    scene_notes = await call_model(client, "director", task, state["premise"])
-    print("[Director] Scene setup complete!")
-    return {"scene_notes": scene_notes}
+    notes = await call_model(client, "director", task, state["premise"])
+    next_node = choose_next_node({**state, "director_notes": notes})
+    print(f"[director] next_node={next_node}")
+    return {"director_notes": notes, "next_node": next_node}
 
 
 async def character_a(state: StageState) -> StageState:
-    print("[Character A] Turn started...")
     client = build_client()
     history = state.get("dialogue_history", [])
-    history_text = "\n".join(history) if history else "(No dialogue yet)"
+    history_text = "\n".join(history) or "(No dialogue yet)"
     task = (
-        "Speak as Character A in one short line.\n"
-        "React to the scene notes and prior dialogue.\n"
-        "Return only the spoken line (no speaker label).\n\n"
-        f"Scene notes:\n{state['scene_notes']}\n\n"
+        "Respond as Character A with one short spoken line. React to the stage direction and prior dialogue. "
+        "Do not add speaker labels.\n\n"
+        f"Director notes:\n{state['director_notes']}\n\n"
         f"Dialogue so far:\n{history_text}"
     )
-    line = await call_model(client, "character_a", task, state["premise"])
-    utterance = f"Character A: {' '.join(line.split())}"
-    print("[Character A] Turn complete!")
-    return {"dialogue_history": [*history, utterance]}
+    line = " ".join((await call_model(client, "character_a", task, state["premise"])).split())
+    new_history = [*history, f"Character A: {line}"]
+    next_node = choose_next_node({**state, "dialogue_history": new_history, "turns": state.get("turns", 0) + 1})
+    print(f"[character_a] turns={state.get('turns', 0) + 1} next_node={next_node}")
+    return {"dialogue_history": new_history, "turns": state.get("turns", 0) + 1, "next_node": next_node}
 
 
 async def character_b(state: StageState) -> StageState:
-    print("[Character B] Turn started...")
     client = build_client()
     history = state.get("dialogue_history", [])
-    history_text = "\n".join(history) if history else "(No dialogue yet)"
+    history_text = "\n".join(history) or "(No dialogue yet)"
     task = (
-        "Speak as Character B in one short line.\n"
-        "React to Character A and raise tension slightly.\n"
-        "Return only the spoken line (no speaker label).\n\n"
-        f"Scene notes:\n{state['scene_notes']}\n\n"
+        "Respond as Character B with one short spoken line. Answer Character A and raise tension a little. "
+        "Do not add speaker labels.\n\n"
+        f"Director notes:\n{state['director_notes']}\n\n"
         f"Dialogue so far:\n{history_text}"
     )
-    line = await call_model(client, "character_b", task, state["premise"])
-    utterance = f"Character B: {' '.join(line.split())}"
-    print("[Character B] Turn complete!")
-    return {"dialogue_history": [*history, utterance]}
+    line = " ".join((await call_model(client, "character_b", task, state["premise"])).split())
+    new_history = [*history, f"Character B: {line}"]
+    next_node = choose_next_node({**state, "dialogue_history": new_history, "turns": state.get("turns", 0) + 1})
+    print(f"[character_b] turns={state.get('turns', 0) + 1} next_node={next_node}")
+    return {"dialogue_history": new_history, "turns": state.get("turns", 0) + 1, "next_node": next_node}
 
 
 async def writer(state: StageState) -> StageState:
-    print("[Writer] Drafting started...")
     client = build_client()
     history_text = "\n".join(state.get("dialogue_history", []))
     task = (
-        "Turn the notes and dialogue into a short stage-play scene (200-350 words).\n"
-        "Keep speaker labels and stage cues compact.\n\n"
-        f"Scene notes:\n{state['scene_notes']}\n\n"
+        "Turn the notes and dialogue into one short polished scene of about 250-400 words. "
+        "Preserve the character tension from the dialogue.\n\n"
+        f"Manager notes:\n{state['manager_notes']}\n\n"
+        f"Director notes:\n{state['director_notes']}\n\n"
         f"Dialogue history:\n{history_text}"
     )
-    notes = await call_model(client, "writer", task, state["premise"])
-    print("[Writer] Drafting complete!")
-    return {"draft": notes}
+    draft = await call_model(client, "writer", task, state["premise"])
+    next_node = "auditor"
+    print(f"[writer] next_node={next_node}")
+    return {"draft": draft, "next_node": next_node}
 
 
 async def auditor(state: StageState) -> StageState:
-    print("[Auditor] Review started...")
     client = build_client()
     task = (
-        "Audit the draft in 3 bullets:\n"
-        "- continuity\n"
-        "- voice consistency\n"
-        "- tension quality\n"
-        "End with one concrete revision suggestion.\n\n"
+        "Review the draft in 3 bullets: what works, what feels weak, and one concrete next improvement.\n\n"
         f"Draft:\n{state['draft']}"
     )
-    notes = await call_model(client, "auditor", task, state["premise"])
-    print("[Auditor] Review complete!")
-    return {"audit": notes}
+    audit = await call_model(client, "auditor", task, state["premise"])
+    next_node = "end"
+    print(f"[auditor] next_node={next_node}")
+    return {"audit": audit, "next_node": next_node}
 
 
-def route_from_manager(state: StageState) -> NodeName:
+def route(state: StageState) -> NodeName:
     return state.get("next_node", "end")
 
 
@@ -191,7 +201,7 @@ def build_graph():
     graph.set_entry_point("manager")
     graph.add_conditional_edges(
         "manager",
-        route_from_manager,
+        route,
         {
             "director": "director",
             "character_a": "character_a",
@@ -201,26 +211,63 @@ def build_graph():
             "end": END,
         },
     )
-    graph.add_edge("director", "manager")
-    graph.add_edge("character_a", "manager")
-    graph.add_edge("character_b", "manager")
-    graph.add_edge("writer", "manager")
-    graph.add_edge("auditor", "manager")
+    graph.add_conditional_edges(
+        "director",
+        route,
+        {
+            "character_a": "character_a",
+            "character_b": "character_b",
+            "writer": "writer",
+            "auditor": "auditor",
+            "end": END,
+        },
+    )
+    graph.add_conditional_edges(
+        "character_a",
+        route,
+        {
+            "character_a": "character_a",
+            "character_b": "character_b",
+            "writer": "writer",
+            "auditor": "auditor",
+            "end": END,
+        },
+    )
+    graph.add_conditional_edges(
+        "character_b",
+        route,
+        {
+            "character_a": "character_a",
+            "character_b": "character_b",
+            "writer": "writer",
+            "auditor": "auditor",
+            "end": END,
+        },
+    )
+    graph.add_conditional_edges("writer", route, {"auditor": "auditor", "end": END})
+    graph.add_conditional_edges("auditor", route, {"end": END})
 
     return graph.compile()
 
 
 async def run_demo(premise: str) -> StageState:
     app = build_graph()
-    initial_state: StageState = {"premise": premise, "dialogue_history": []}
+    initial_state: StageState = {
+        "premise": premise,
+        "dialogue_history": [],
+        "turns": 0,
+        "next_node": "manager",
+    }
     return await app.ainvoke(initial_state)
 
 
 def print_result(state: StageState) -> None:
     print("=== Premise ===")
     print(state["premise"])
-    print("\n=== Scene Notes ===")
-    print(state.get("scene_notes", ""))
+    print("\n=== Manager Notes ===")
+    print(state.get("manager_notes", ""))
+    print("\n=== Director Notes ===")
+    print(state.get("director_notes", ""))
     print("\n=== Dialogue History ===")
     for line in state.get("dialogue_history", []):
         print(line)
@@ -233,8 +280,8 @@ def print_result(state: StageState) -> None:
 async def main() -> None:
     load_dotenv()
     premise = os.getenv(
-        "STAGE_PREMISE",
-        "Two estranged magicians reunite backstage before a final performance that may expose their shared secret.",
+        "NOVEL_PREMISE",
+        "Two rival archivists must cooperate to decode a living library before it erases their memories.",
     )
     result = await run_demo(premise)
     print_result(result)

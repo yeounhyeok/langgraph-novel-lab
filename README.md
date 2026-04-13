@@ -1,61 +1,69 @@
-# langgraph-stage-play-lab
+# langgraph-novel-lab
 
-Minimal educational LangGraph demo for a multi-agent stage play.
+Minimal LangGraph demo for a tiny multi-agent novel scene.
 
 ## What this project shows
 
-- A state-driven graph (not a fixed `A -> B -> writer` chain)
-- Dynamic routing by `manager` using current state
-- Turn-based character interaction (`character_a`, `character_b`)
-- Final drafting and audit pass
+- state-driven routing with `next_node`
+- explicit turn tracking with `turns`
+- alternating dialogue between `character_a` and `character_b`
+- a small but complete flow: `manager -> director -> characters -> writer -> auditor`
+- a structure that stays readable for a first LangGraph exercise
 
-## State shape
+## Nodes
+
+- `manager`: creates the high-level scene plan
+- `director`: turns the plan into concrete stage direction
+- `character_a`: adds Character A's next line
+- `character_b`: adds Character B's next line
+- `writer`: turns notes + dialogue into a short scene
+- `auditor`: reviews the draft
+
+## State
 
 The graph state keeps:
 
 - `premise`
-- `scene_notes`
+- `manager_notes`
+- `director_notes`
 - `dialogue_history`
 - `draft`
 - `audit`
 - `next_node`
+- `turns`
 
-## Graph flow (dynamic)
+## Routing
+
+Routing is dynamic, but intentionally simple:
 
 ```text
-manager --(next_node)--> director | character_a | character_b | writer | auditor | END
-director   -> manager
-character_a-> manager
-character_b-> manager
-writer     -> manager
-auditor    -> manager
+manager -> director -> character_a <-> character_b -> writer -> auditor -> END
 ```
 
-`manager` inspects state and decides the next node:
+The important part is that the graph does **not** hardcode a one-shot `character_a -> character_b -> writer` pipeline.
+Instead, each node updates state, and routing follows `next_node`.
 
-- no `scene_notes` yet -> `director`
-- dialogue turns not enough -> alternate `character_a` / `character_b`
-- dialogue done, no `draft` -> `writer`
-- no `audit` -> `auditor`
-- otherwise -> `END`
+`turns` and `dialogue_history` decide whether the graph should:
+
+- keep the dialogue going
+- switch speakers
+- stop the exchange and move to `writer`
 
 ## Project structure
 
 ```text
-langgraph-stage-play-lab/
+langgraph-novel-lab/
 ├─ src/
 │  └─ langgraph_novel_lab/
 │     ├─ __init__.py
 │     └─ main.py
-├─ notebooks/
-│  └─ demo.ipynb
 ├─ .env.example
 ├─ .gitignore
 ├─ README.md
 └─ requirements.txt
 ```
 
-## Setup (venv)
+## Setup
 
 ### macOS / Linux
 
@@ -63,6 +71,7 @@ langgraph-stage-play-lab/
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
+cp .env.example .env
 ```
 
 ### Windows (PowerShell)
@@ -71,62 +80,33 @@ pip install -r requirements.txt
 py -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
-```
-
-## Configure `.env` (local OpenAI-compatible provider)
-
-Copy and edit:
-
-### macOS / Linux
-
-```bash
-cp .env.example .env
-```
-
-### Windows (PowerShell)
-
-```powershell
 Copy-Item .env.example .env
 ```
 
-Required values:
+## `.env`
 
-- `OPENAI_BASE_URL` (example: `http://localhost:1234/v1`)
-- `OPENAI_API_KEY`
-- `OPENAI_MODEL`
+Example:
 
-Optional values:
+```env
+OPENAI_BASE_URL=http://localhost:1234/v1
+OPENAI_API_KEY=lm-studio
+OPENAI_MODEL=qwen2.5-7b-instruct
+NOVEL_PREMISE=Two rival archivists must cooperate to decode a living library before it erases their memories.
+TARGET_DIALOGUE_TURNS=4
+```
 
-- `STAGE_PREMISE`
-- `TARGET_DIALOGUE_TURNS` (default: `6`)
-
-## Run from terminal
+## Run
 
 ```bash
 python -m src.langgraph_novel_lab.main
 ```
 
-This prints:
+The script prints the notes, dialogue history, draft, and audit result.
 
-- manager routing logs
-- scene notes
-- dialogue history
-- scene draft
-- audit summary
+## Why this is a good first learning structure
 
-## Run from notebook
-
-Open `notebooks/demo.ipynb` and run cells in order.
-
-The notebook already includes project-root path setup and async invocation with:
-
-```python
-result = await app.ainvoke({"premise": premise, "dialogue_history": []})
-```
-
-## Extend ideas
-
-- add more characters
-- add retry/revision loop after `auditor`
-- let manager use an LLM policy instead of deterministic rules
-- store structured dialogue turns (dicts instead of strings)
+- only one file of logic
+- only a few state fields
+- routing rules are visible in plain Python
+- enough moving parts to show why LangGraph is useful
+- small enough to modify without getting lost
