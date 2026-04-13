@@ -115,24 +115,29 @@ Copy-Item .env.example .env
 
 ## `.env` 설정
 
-예시:
+기본 템플릿(`.env.example`과 동일):
 
 ```env
-OPENAI_BASE_URL=http://localhost:1234/v1
-OPENAI_API_KEY=lm-studio
-OPENAI_MODEL=qwen2.5-7b-instruct
-NOVEL_PREMISE=Two rival archivists must cooperate to decode a living library before it erases their memories.
-TARGET_DIALOGUE_TURNS=6
+OPENAI_BASE_URL=https://api.openai.com/v1
+OPENAI_API_KEY=your-api-key
+OPENAI_MODEL=gpt-4o-mini
+
+# Ollama example (OpenAI-compatible endpoint)
+#OPENAI_BASE_URL=http://localhost:11434/v1
+#OPENAI_API_KEY=ollama
+#OPENAI_MODEL=qwen2.5:7b-instruct
+
+# Optional prompt override
+#NOVEL_PREMISE=Two rival archivists must cooperate to decode a living library before it erases their memories.
+#TARGET_DIALOGUE_TURNS=4
 ```
 
-Ollama 예시:
+Ollama로 바로 실행하려면 아래처럼 바꿔서 사용하면 됩니다.
 
 ```env
 OPENAI_BASE_URL=http://localhost:11434/v1
 OPENAI_API_KEY=ollama
 OPENAI_MODEL=qwen2.5:7b-instruct
-NOVEL_PREMISE=Two rival archivists must cooperate to decode a living library before it erases their memories.
-TARGET_DIALOGUE_TURNS=6
 ```
 
 추가로, `OPENAI_BASE_URL`이 `localhost:11434`를 가리킬 때 API 키가 비어 있으면 내부적으로 `OPENAI_API_KEY=ollama`를 자동 사용합니다.
