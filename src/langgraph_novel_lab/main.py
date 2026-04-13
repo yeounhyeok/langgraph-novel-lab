@@ -25,6 +25,8 @@ class StageState(TypedDict, total=False):
     premise: str
     manager_notes: str
     director_notes: str
+    character_a_trait: str
+    character_b_trait: str
     dialogue_history: list[str]
     draft: str
     audit: str
@@ -115,6 +117,12 @@ def strip_speaker_prefix(text: str) -> str:
     return re.sub(r"^[^:：]+:\s*", "", cleaned)
 
 
+def extract_character_traits(director_notes: str) -> tuple[str, str]:
+    trait_a = parse_tagged_value(director_notes, "인물A_핵심특성") or "직진형 결단가"
+    trait_b = parse_tagged_value(director_notes, "인물B_핵심특성") or "신중한 전략가"
+    return trait_a, trait_b
+
+
 def parse_audit_result(audit: str) -> tuple[str, str]:
     status_raw = parse_tagged_value(audit, "판정").lower()
     target_raw = parse_tagged_value(audit, "되돌아갈_노드").lower()
@@ -174,6 +182,11 @@ def should_force_revision(draft: str, dialogue_history: list[str]) -> str | None
     return None
 
 
+def print_node_message(node: str, label: str, text: str) -> None:
+    print(f"[{node}] {label}")
+    print(text)
+
+
 def choose_next_node(state: StageState) -> NodeName:
     turns = state.get("turns", 0)
     history = state.get("dialogue_history", [])
@@ -214,6 +227,7 @@ async def manager(state: StageState) -> StageState:
     notes = await call_model(client, "manager", task, state["premise"])
     next_node = "director"
     print(f"[manager] revision_count={state.get('revision_count', 0)} next_node={next_node}")
+    print_node_message("manager", "notes", notes)
     return {"manager_notes": notes, "next_node": next_node}
 
 
@@ -224,23 +238,36 @@ async def director(state: StageState) -> StageState:
         "- 배경/장소\n"
         "- 분위기\n"
         "- 당장 닥친 압박\n\n"
+        "그리고 반드시 마지막에 아래 2줄을 추가하세요.\n"
+        "인물A_핵심특성: (한 줄)\n"
+        "인물B_핵심특성: (한 줄)\n\n"
         "초보자도 읽기 쉽도록 짧고 선명하게 쓰세요.\n"
         "수정 라운드라면 감수에서 지적한 약점을 메울 수 있는 무대 압박을 더 또렷하게 잡으세요.\n\n"
         f"매니저 메모:\n{state['manager_notes']}\n\n"
         f"감수 의견(있다면 참고):\n{state.get('audit', '(없음)')}"
     )
     notes = await call_model(client, "director", task, state["premise"])
+    trait_a, trait_b = extract_character_traits(notes)
     next_node = choose_next_node({**state, "director_notes": notes})
     print(f"[director] next_node={next_node}")
-    return {"director_notes": notes, "next_node": next_node}
+    print_node_message("director", "notes", notes)
+    return {
+        "director_notes": notes,
+        "character_a_trait": trait_a,
+        "character_b_trait": trait_b,
+        "next_node": next_node,
+    }
 
 
 async def character_a(state: StageState) -> StageState:
     client = build_client()
     history = state.get("dialogue_history", [])
     history_text = "\n".join(history) or "(아직 대화 없음)"
+    trait_a = state.get("character_a_trait", "직진형 결단가")
     task = (
         f"{SPEAKER_A}로 말하세요. 한국어 대사만 출력하세요. 화자 라벨은 붙이지 마세요.\n"
+        f"최우선 규칙: 아래 핵심특성을 절대 유지하세요 -> {trait_a}\n"
+        "말투/판단/반응에서 이 특성이 가장 먼저 드러나야 합니다.\n"
         "실제 상황이라 간주하고 직전 발화에 분명히 응답하세요. 1~2문장으로 충분한 내용을 담으세요.\n"
         "수정 라운드라면 이전보다 더 직접적으로 충돌하거나 보완해 장면의 결을 바꾸세요.\n\n"
         f"연출 메모:\n{state['director_notes']}\n\n"
@@ -251,6 +278,7 @@ async def character_a(state: StageState) -> StageState:
     new_history = [*history, f"{SPEAKER_A}: {line}"]
     next_node = choose_next_node({**state, "dialogue_history": new_history, "turns": state.get("turns", 0) + 1})
     print(f"[character_a] turns={state.get('turns', 0) + 1} next_node={next_node}")
+    print_node_message("character_a", "line", line)
     return {"dialogue_history": new_history, "turns": state.get("turns", 0) + 1, "next_node": next_node}
 
 
@@ -258,8 +286,11 @@ async def character_b(state: StageState) -> StageState:
     client = build_client()
     history = state.get("dialogue_history", [])
     history_text = "\n".join(history) or "(아직 대화 없음)"
+    trait_b = state.get("character_b_trait", "신중한 전략가")
     task = (
         f"{SPEAKER_B}로 말하세요. 한국어 대사만 출력하세요. 화자 라벨은 붙이지 마세요.\n"
+        f"최우선 규칙: 아래 핵심특성을 절대 유지하세요 -> {trait_b}\n"
+        "말투/판단/반응에서 이 특성이 가장 먼저 드러나야 합니다.\n"
         "실제 상황이라 간주하고 직전 발화에 분명히 응답하세요. 1~2문장으로 충분한 내용을 담으세요.\n"
         "수정 라운드라면 이전보다 더 직접적으로 충돌하거나 보완해 장면의 결을 바꾸세요.\n\n"
         f"연출 메모:\n{state['director_notes']}\n\n"
@@ -270,6 +301,7 @@ async def character_b(state: StageState) -> StageState:
     new_history = [*history, f"{SPEAKER_B}: {line}"]
     next_node = choose_next_node({**state, "dialogue_history": new_history, "turns": state.get("turns", 0) + 1})
     print(f"[character_b] turns={state.get('turns', 0) + 1} next_node={next_node}")
+    print_node_message("character_b", "line", line)
     return {"dialogue_history": new_history, "turns": state.get("turns", 0) + 1, "next_node": next_node}
 
 
@@ -302,6 +334,7 @@ async def writer(state: StageState) -> StageState:
     draft = await call_model(client, "writer", task, state["premise"])
     next_node = "auditor"
     print(f"[writer] revision_count={state.get('revision_count', 0)} next_node={next_node}")
+    print_node_message("writer", "draft", draft)
     return {"draft": draft, "next_node": next_node}
 
 
@@ -347,6 +380,7 @@ async def auditor(state: StageState) -> StageState:
         "[auditor] "
         f"status={audit_status} target={audit_target} revision_count={new_revision_count} next_node={next_node}"
     )
+    print_node_message("auditor", "audit", audit)
     return {
         "audit": audit,
         "audit_status": audit_status,
@@ -452,6 +486,9 @@ def print_result(state: StageState) -> None:
     print(state.get("manager_notes", ""))
     print("\n=== 디렉터 메모 ===")
     print(state.get("director_notes", ""))
+    print("\n=== 캐릭터 핵심특성 ===")
+    print(f"{SPEAKER_A}: {state.get('character_a_trait', '(없음)')}")
+    print(f"{SPEAKER_B}: {state.get('character_b_trait', '(없음)')}")
     print("\n=== 대화 기록 ===")
     for line in state.get("dialogue_history", []):
         print(line)
