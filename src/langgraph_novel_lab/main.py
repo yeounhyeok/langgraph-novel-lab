@@ -1,9 +1,14 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import re
-from typing import Literal, TypedDict
+from datetime import datetime
+from pathlib import Path
+from time import perf_counter
+from typing import Any, Literal, TypedDict
+from urllib.parse import urlparse
 
 from dotenv import load_dotenv
 from langgraph.graph import END, StateGraph
@@ -36,6 +41,7 @@ class StageState(TypedDict, total=False):
     max_revisions: int
     next_node: NodeName
     turns: int
+    run_output_dir: str
 
 
 SYSTEM_STYLE = (
@@ -48,6 +54,87 @@ SPEAKER_A = "인물 A"
 SPEAKER_B = "인물 B"
 AUDIT_STATUS_LABELS = {"pass": "통과", "revise": "수정 필요"}
 AUDIT_TARGET_LABELS = {"manager": "manager", "writer": "writer", "end": "end"}
+RUN_CALL_LOGS: list[dict[str, Any]] = []
+
+
+def detect_provider(base_url: str) -> str:
+    normalized = base_url.strip().lower()
+    if not normalized:
+        return "openai"
+    if "api.openai.com" in normalized:
+        return "openai"
+    if "ollama" in normalized or "11434" in normalized:
+        return "ollama"
+    parsed = urlparse(normalized)
+    return parsed.netloc or "custom"
+
+
+def create_run_dir() -> Path:
+    root = Path(os.getenv("NOVEL_RUNS_DIR", "logs/runs").strip() or "logs/runs")
+    run_id = datetime.now().strftime("%Y%m%d-%H%M%S")
+    run_dir = root / run_id
+    run_dir.mkdir(parents=True, exist_ok=True)
+    return run_dir
+
+
+def save_run_artifacts(state: StageState, total_elapsed_ms: int) -> Path:
+    run_dir = create_run_dir()
+    model = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+    base_url = os.getenv("OPENAI_BASE_URL", "").strip()
+    provider = detect_provider(base_url)
+
+    summary = {
+        "saved_at": datetime.now().isoformat(timespec="seconds"),
+        "provider": provider,
+        "model": model,
+        "base_url": base_url,
+        "total_elapsed_ms": total_elapsed_ms,
+        "total_elapsed_sec": round(total_elapsed_ms / 1000, 3),
+        "llm_call_count": len(RUN_CALL_LOGS),
+        "llm_calls": RUN_CALL_LOGS,
+        "final_status": {
+            "turns": state.get("turns", 0),
+            "revision_count": state.get("revision_count", 0),
+            "audit_status": state.get("audit_status", ""),
+            "audit_target": state.get("audit_target", ""),
+        },
+    }
+
+    outputs_md = (
+        f"# Run Output\n\n"
+        f"- Saved At: {summary['saved_at']}\n"
+        f"- Provider: {provider}\n"
+        f"- Model: {model}\n"
+        f"- Base URL: {base_url or '(default)'}\n"
+        f"- Total Time: {total_elapsed_ms} ms\n"
+        f"- LLM Calls: {len(RUN_CALL_LOGS)}\n\n"
+        "## Premise\n"
+        f"{state.get('premise', '')}\n\n"
+        "## Manager Notes\n"
+        f"{state.get('manager_notes', '')}\n\n"
+        "## Director Notes\n"
+        f"{state.get('director_notes', '')}\n\n"
+        "## Character Traits\n"
+        f"- {SPEAKER_A}: {state.get('character_a_trait', '')}\n"
+        f"- {SPEAKER_B}: {state.get('character_b_trait', '')}\n\n"
+        "## Dialogue History\n"
+        + ("\n".join(state.get("dialogue_history", [])) or "(없음)")
+        + "\n\n## Draft\n"
+        + f"{state.get('draft', '')}\n\n"
+        + "## Audit\n"
+        + f"{state.get('audit', '')}\n"
+    )
+
+    (run_dir / "summary.json").write_text(
+        json.dumps(summary, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    (run_dir / "state.json").write_text(
+        json.dumps(state, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    (run_dir / "outputs.md").write_text(outputs_md, encoding="utf-8")
+    return run_dir
 
 
 def sanitize_line(text: str) -> str:
@@ -85,6 +172,9 @@ def build_client() -> AsyncOpenAI:
 
 async def call_model(client: AsyncOpenAI, role: str, task: str, premise: str) -> str:
     model = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+    base_url = os.getenv("OPENAI_BASE_URL", "").strip()
+    provider = detect_provider(base_url)
+    started = perf_counter()
     response = await client.chat.completions.create(
         model=model,
         temperature=1,
@@ -100,7 +190,24 @@ async def call_model(client: AsyncOpenAI, role: str, task: str, premise: str) ->
             },
         ],
     )
-    return (response.choices[0].message.content or "").strip()
+    elapsed_ms = int((perf_counter() - started) * 1000)
+    content = (response.choices[0].message.content or "").strip()
+    RUN_CALL_LOGS.append(
+        {
+            "ts": datetime.now().isoformat(timespec="seconds"),
+            "role": role,
+            "provider": provider,
+            "model": model,
+            "elapsed_ms": elapsed_ms,
+            "output_chars": len(content),
+            "finish_reason": response.choices[0].finish_reason,
+        }
+    )
+    print(
+        f"[llm] role={role} provider={provider} model={model} "
+        f"elapsed_ms={elapsed_ms} output_chars={len(content)}"
+    )
+    return content
 
 
 def target_turns() -> int:
@@ -472,6 +579,7 @@ def build_graph():
 
 
 async def run_demo(premise: str) -> StageState:
+    RUN_CALL_LOGS.clear()
     app = build_graph()
     initial_state: StageState = {
         "premise": premise,
@@ -481,7 +589,17 @@ async def run_demo(premise: str) -> StageState:
         "max_revisions": 1,
         "next_node": "manager",
     }
-    return await app.ainvoke(initial_state)
+    started = perf_counter()
+    result = await app.ainvoke(initial_state)
+    total_elapsed_ms = int((perf_counter() - started) * 1000)
+
+    save_enabled = os.getenv("NOVEL_SAVE_RUN", "1").strip().lower() in {"1", "true", "yes", "on"}
+    if save_enabled:
+        run_dir = save_run_artifacts(result, total_elapsed_ms)
+        result["run_output_dir"] = str(run_dir)
+        print(f"[run] 저장 완료: {run_dir}")
+
+    return result
 
 
 def print_result(state: StageState) -> None:
