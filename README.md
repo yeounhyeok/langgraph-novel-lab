@@ -7,6 +7,7 @@ Minimal LangGraph demo for a tiny multi-agent novel scene.
 - state-driven routing with `next_node`
 - explicit turn tracking with `turns`
 - alternating dialogue between `character_a` and `character_b`
+- Korean-first outputs for notes, dialogue, scene draft, and auditor feedback
 - a small but complete flow: `manager -> director -> characters -> writer -> auditor`
 - a structure that stays readable for a first LangGraph exercise
 
@@ -94,7 +95,7 @@ OPENAI_BASE_URL=http://localhost:1234/v1
 OPENAI_API_KEY=lm-studio
 OPENAI_MODEL=qwen2.5-7b-instruct
 NOVEL_PREMISE=Two rival archivists must cooperate to decode a living library before it erases their memories.
-TARGET_DIALOGUE_TURNS=4
+TARGET_DIALOGUE_TURNS=6
 ```
 
 ## Run
@@ -105,12 +106,12 @@ TARGET_DIALOGUE_TURNS=4
 python -m src.langgraph_novel_lab.main
 ```
 
-The script prints the notes, dialogue history, draft, and audit result.
+The script prints the notes, dialogue history, draft, and audit result in Korean.
 
 ### Jupyter notebook
 
 A beginner-friendly notebook is included at `notebooks/demo.ipynb`.
-It walks through imports, state setup, graph creation, execution, and inspecting outputs with a simple Korean premise.
+It walks through imports, state setup, graph creation, execution, and inspecting outputs with the K-pop demon hunters premise used in this repo.
 
 If you want to open it interactively:
 
