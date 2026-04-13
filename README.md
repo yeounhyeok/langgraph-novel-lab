@@ -53,6 +53,8 @@ Instead, each node updates state, and routing follows `next_node`.
 
 ```text
 langgraph-novel-lab/
+├─ notebooks/
+│  └─ demo.ipynb
 ├─ src/
 │  └─ langgraph_novel_lab/
 │     ├─ __init__.py
@@ -97,11 +99,25 @@ TARGET_DIALOGUE_TURNS=4
 
 ## Run
 
+### Python script
+
 ```bash
 python -m src.langgraph_novel_lab.main
 ```
 
 The script prints the notes, dialogue history, draft, and audit result.
+
+### Jupyter notebook
+
+A beginner-friendly notebook is included at `notebooks/demo.ipynb`.
+It walks through imports, state setup, graph creation, execution, and inspecting outputs with a simple Korean premise.
+
+If you want to open it interactively:
+
+```bash
+pip install jupyter ipykernel nbformat nbclient
+jupyter notebook notebooks/demo.ipynb
+```
 
 ## Why this is a good first learning structure
 
