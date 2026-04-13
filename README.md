@@ -7,8 +7,11 @@ Minimal LangGraph demo for a tiny multi-agent novel scene.
 - state-driven routing with `next_node`
 - explicit turn tracking with `turns`
 - alternating dialogue between `character_a` and `character_b`
+- director-assigned character traits that each character must keep as top priority in dialogue
 - Korean-first outputs for notes, dialogue, scene draft, and auditor feedback
 - a small but complete flow: `manager -> director -> characters -> writer -> auditor`
+- node-level live logs (each node prints its generated message while running)
+- an auditor fallback heuristic that can force revision when a draft is too weak
 - a structure that stays readable for a first LangGraph exercise
 
 ## Nodes
@@ -27,6 +30,8 @@ The graph state keeps:
 - `premise`
 - `manager_notes`
 - `director_notes`
+- `character_a_trait`
+- `character_b_trait`
 - `dialogue_history`
 - `draft`
 - `audit`
@@ -61,8 +66,16 @@ After `auditor`, the graph can now:
 - end the run when the draft is strong enough
 - send the flow back to `writer` for a revision pass
 - send the flow back to `manager` when the scene plan itself needs stronger tension or clearer stakes
+- auto-correct a weak `pass` into `revise` when simple quality checks fail (short draft, too much dialogue copy, weak scene/tension terms)
 
 The auditor output is intentionally tagged in Korean so beginners can inspect it and see why the graph routed backward.
+
+The director now also emits:
+
+- `인물A_핵심특성`
+- `인물B_핵심특성`
+
+and both character nodes are prompted to preserve those traits as their first-priority rule.
 
 ## Project structure
 
@@ -122,6 +135,8 @@ NOVEL_PREMISE=Two rival archivists must cooperate to decode a living library bef
 TARGET_DIALOGUE_TURNS=6
 ```
 
+For Ollama, this project also auto-falls back to `OPENAI_API_KEY=ollama` when the key is missing and `OPENAI_BASE_URL` points to `localhost:11434`.
+
 ## Run
 
 ### Python script
@@ -131,6 +146,14 @@ python -m src.langgraph_novel_lab.main
 ```
 
 The script prints the notes, dialogue history, draft, audit result, and whether a revision loop happened in Korean.
+During execution, each node also prints live logs like:
+
+- `[manager] notes`
+- `[director] notes`
+- `[character_a] line`
+- `[character_b] line`
+- `[writer] draft`
+- `[auditor] audit`
 
 ### Jupyter notebook
 
