@@ -112,6 +112,16 @@ NOVEL_PREMISE=Two rival archivists must cooperate to decode a living library bef
 TARGET_DIALOGUE_TURNS=6
 ```
 
+Ollama example:
+
+```env
+OPENAI_BASE_URL=http://localhost:11434/v1
+OPENAI_API_KEY=ollama
+OPENAI_MODEL=qwen2.5:7b-instruct
+NOVEL_PREMISE=Two rival archivists must cooperate to decode a living library before it erases their memories.
+TARGET_DIALOGUE_TURNS=6
+```
+
 ## Run
 
 ### Python script

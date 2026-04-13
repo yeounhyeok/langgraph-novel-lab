@@ -66,11 +66,16 @@ def sanitize_line(text: str) -> str:
 
 
 def build_client() -> AsyncOpenAI:
-    api_key = os.getenv("OPENAI_API_KEY", "").strip()
-    if not api_key:
-        raise RuntimeError("OPENAI_API_KEY is not set.")
-
     base_url = os.getenv("OPENAI_BASE_URL", "").strip()
+    api_key = os.getenv("OPENAI_API_KEY", "").strip()
+    is_ollama = "localhost:11434" in base_url or "127.0.0.1:11434" in base_url
+    if not api_key:
+        if is_ollama:
+            # Ollama's OpenAI-compatible endpoint does not require a real API key.
+            api_key = "ollama"
+        else:
+            raise RuntimeError("OPENAI_API_KEY is not set.")
+
     kwargs = {"api_key": api_key}
     if base_url:
         kwargs["base_url"] = base_url
