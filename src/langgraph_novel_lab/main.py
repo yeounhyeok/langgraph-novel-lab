@@ -25,9 +25,16 @@ SYSTEM_STYLE = (
 
 
 def build_client() -> OpenAI:
-    base_url = os.getenv("OPENAI_BASE_URL")
-    api_key = os.getenv("OPENAI_API_KEY", "dummy")
-    return OpenAI(base_url=base_url, api_key=api_key)
+    api_key = os.getenv("OPENAI_API_KEY", "").strip()
+    if not api_key:
+        raise RuntimeError("OPENAI_API_KEY is not set.")
+
+    base_url = os.getenv("OPENAI_BASE_URL", "").strip()
+    kwargs = {"api_key": api_key}
+    if base_url:
+        kwargs["base_url"] = base_url
+
+    return OpenAI(**kwargs)
 
 
 def call_model(client: OpenAI, role: str, task: str, premise: str) -> str:

@@ -86,12 +86,19 @@ cp .env.example .env
 Copy-Item .env.example .env
 ```
 
-Set these values for your local OpenAI-compatible provider:
+For OpenAI Cloud, set:
+
+- `OPENAI_API_KEY` — your OpenAI API key
+- `OPENAI_MODEL` — for example `gpt-4o-mini`
+- `NOVEL_PREMISE` — optional custom premise for the demo
+
+Leave `OPENAI_BASE_URL` unset for OpenAI Cloud.
+
+If you want to use a custom OpenAI-compatible provider instead, set:
 
 - `OPENAI_BASE_URL` — API base URL, for example `http://localhost:1234/v1`
 - `OPENAI_API_KEY` — any key your local provider expects
 - `OPENAI_MODEL` — model name exposed by that provider
-- `NOVEL_PREMISE` — optional custom premise for the demo
 
 Examples of compatible local providers include LM Studio, Ollama bridges that expose an OpenAI-style endpoint, and vLLM-based local servers.
 
