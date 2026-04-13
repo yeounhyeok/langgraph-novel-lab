@@ -18,7 +18,7 @@ class NovelState(TypedDict, total=False):
 
 
 SYSTEM_STYLE = (
-    "You are part of a tiny educational multi-agent novel-writing demo. "
+    "You are part of a tiny educational multi-agent novel-writing demo in Korean language. "
     "Be concise, concrete, and collaborative."
 )
 
