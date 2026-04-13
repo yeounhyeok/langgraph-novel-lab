@@ -30,6 +30,10 @@ The graph state keeps:
 - `dialogue_history`
 - `draft`
 - `audit`
+- `audit_status`
+- `audit_target`
+- `revision_count`
+- `max_revisions`
 - `next_node`
 - `turns`
 
@@ -38,7 +42,9 @@ The graph state keeps:
 Routing is dynamic, but intentionally simple:
 
 ```text
-manager -> director -> character_a <-> character_b -> writer -> auditor -> END
+manager -> director -> character_a <-> character_b -> writer -> auditor
+                                           ^                     |
+                                           |---------------------|
 ```
 
 The important part is that the graph does **not** hardcode a one-shot `character_a -> character_b -> writer` pipeline.
@@ -49,6 +55,14 @@ Instead, each node updates state, and routing follows `next_node`.
 - keep the dialogue going
 - switch speakers
 - stop the exchange and move to `writer`
+
+After `auditor`, the graph can now:
+
+- end the run when the draft is strong enough
+- send the flow back to `writer` for a revision pass
+- send the flow back to `manager` when the scene plan itself needs stronger tension or clearer stakes
+
+The auditor output is intentionally tagged in Korean so beginners can inspect it and see why the graph routed backward.
 
 ## Project structure
 
@@ -106,7 +120,7 @@ TARGET_DIALOGUE_TURNS=6
 python -m src.langgraph_novel_lab.main
 ```
 
-The script prints the notes, dialogue history, draft, and audit result in Korean.
+The script prints the notes, dialogue history, draft, audit result, and whether a revision loop happened in Korean.
 
 ### Jupyter notebook
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
 from typing import Literal, TypedDict
 
 from dotenv import load_dotenv
@@ -27,6 +28,10 @@ class StageState(TypedDict, total=False):
     dialogue_history: list[str]
     draft: str
     audit: str
+    audit_status: Literal["pass", "revise"]
+    audit_target: Literal["manager", "writer", "end"]
+    revision_count: int
+    max_revisions: int
     next_node: NodeName
     turns: int
 
@@ -39,6 +44,8 @@ SYSTEM_STYLE = (
 
 SPEAKER_A = "인물 A"
 SPEAKER_B = "인물 B"
+AUDIT_STATUS_LABELS = {"pass": "통과", "revise": "수정 필요"}
+AUDIT_TARGET_LABELS = {"manager": "manager", "writer": "writer", "end": "end"}
 
 
 def sanitize_line(text: str) -> str:
@@ -97,6 +104,33 @@ def target_turns() -> int:
         return 6
 
 
+def parse_tagged_value(text: str, label: str) -> str:
+    pattern = rf"^{re.escape(label)}\s*:\s*(.+)$"
+    match = re.search(pattern, text, flags=re.MULTILINE)
+    return match.group(1).strip() if match else ""
+
+
+def parse_audit_result(audit: str) -> tuple[str, str]:
+    status_raw = parse_tagged_value(audit, "판정").lower()
+    target_raw = parse_tagged_value(audit, "되돌아갈_노드").lower()
+
+    status = "pass" if "통과" in status_raw or status_raw == "pass" else "revise"
+
+    if target_raw in {"manager", "writer", "end"}:
+        target = target_raw
+    elif "manager" in target_raw or "매니저" in target_raw:
+        target = "manager"
+    elif "writer" in target_raw or "작가" in target_raw:
+        target = "writer"
+    else:
+        target = "end" if status == "pass" else "writer"
+
+    if status == "pass":
+        target = "end"
+
+    return status, target
+
+
 def choose_next_node(state: StageState) -> NodeName:
     turns = state.get("turns", 0)
     history = state.get("dialogue_history", [])
@@ -119,17 +153,25 @@ def choose_next_node(state: StageState) -> NodeName:
 async def manager(state: StageState) -> StageState:
     client = build_client()
     history_text = "\n".join(state.get("dialogue_history", [])) or "(아직 대화 없음)"
+    revision_note = ""
+    if state.get("revision_count", 0) > 0 and state.get("audit"):
+        revision_note = (
+            "\n\n이전 감수에서 수정 요청이 왔습니다. 아래 감수 의견을 반영해 메모를 다시 잡아 주세요.\n"
+            f"감수 의견:\n{state['audit']}"
+        )
     task = (
         "한 장면용 운영 메모를 작성하세요. 아래 형식의 한국어 불릿 3개만 작성하세요.\n"
         "- 장면 톤\n"
         "- 이번 장면의 위험/목표\n"
         "- 두 리더 사이에서 드러나야 할 감정적 마찰\n\n"
-        "너무 압축하지 말고, 뒤의 대화가 길고 살아 움직이도록 구체적인 긴장 요소를 넣으세요.\n\n"
+        "너무 압축하지 말고, 뒤의 대화가 길고 살아 움직이도록 구체적인 긴장 요소를 넣으세요.\n"
+        "수정 재진입이라면 감수에서 약하다고 지적한 부분을 더 선명하게 보강하세요.\n\n"
         f"현재까지의 대화:\n{history_text}"
+        f"{revision_note}"
     )
     notes = await call_model(client, "manager", task, state["premise"])
     next_node = "director"
-    print(f"[manager] next_node={next_node}")
+    print(f"[manager] revision_count={state.get('revision_count', 0)} next_node={next_node}")
     return {"manager_notes": notes, "next_node": next_node}
 
 
@@ -140,8 +182,10 @@ async def director(state: StageState) -> StageState:
         "- 배경/장소\n"
         "- 분위기\n"
         "- 당장 닥친 압박\n\n"
-        "초보자도 읽기 쉽도록 짧고 선명하게 쓰되, K-팝 데몬 헌터 설정은 유지하세요.\n\n"
-        f"매니저 메모:\n{state['manager_notes']}"
+        "초보자도 읽기 쉽도록 짧고 선명하게 쓰되, K-팝 데몬 헌터 설정은 유지하세요.\n"
+        "수정 라운드라면 감수에서 지적한 약점을 메울 수 있는 무대 압박을 더 또렷하게 잡으세요.\n\n"
+        f"매니저 메모:\n{state['manager_notes']}\n\n"
+        f"감수 의견(있다면 참고):\n{state.get('audit', '(없음)')}"
     )
     notes = await call_model(client, "director", task, state["premise"])
     next_node = choose_next_node({**state, "director_notes": notes})
@@ -156,8 +200,10 @@ async def character_a(state: StageState) -> StageState:
     task = (
         f"{SPEAKER_A}로 말하세요. 한국어 대사만 출력하세요. 화자 라벨은 붙이지 마세요.\n"
         "한 줄이지만 내용은 충분히 실리게 쓰세요. 1~2문장으로 감정, 판단, 상황 반응이 모두 드러나야 합니다.\n"
-        "상대 리더와의 갈등, 팀의 공연 책임, 악령 사냥의 긴박함을 함께 반영하세요.\n\n"
+        "상대 리더와의 갈등, 팀의 공연 책임, 악령 사냥의 긴박함을 함께 반영하세요.\n"
+        "수정 라운드라면 감수에서 약하다고 한 부분을 보강하는 방향으로 새 대사를 쌓으세요.\n\n"
         f"연출 메모:\n{state['director_notes']}\n\n"
+        f"감수 의견(있다면 참고):\n{state.get('audit', '(없음)')}\n\n"
         f"현재까지의 대화:\n{history_text}"
     )
     line = sanitize_line(await call_model(client, "character_a", task, state["premise"]))
@@ -174,8 +220,10 @@ async def character_b(state: StageState) -> StageState:
     task = (
         f"{SPEAKER_B}로 말하세요. 한국어 대사만 출력하세요. 화자 라벨은 붙이지 마세요.\n"
         "직전 발화에 분명히 응답하면서 긴장을 더 끌어올리세요. 한 줄이지만 1~2문장으로 충분한 내용을 담으세요.\n"
-        "반박, 걱정, 책임감, 그리고 팀을 향한 시선을 함께 드러내세요.\n\n"
+        "반박, 걱정, 책임감, 그리고 팀을 향한 시선을 함께 드러내세요.\n"
+        "수정 라운드라면 이전보다 더 직접적으로 충돌하거나 보완해 장면의 결을 바꾸세요.\n\n"
         f"연출 메모:\n{state['director_notes']}\n\n"
+        f"감수 의견(있다면 참고):\n{state.get('audit', '(없음)')}\n\n"
         f"현재까지의 대화:\n{history_text}"
     )
     line = sanitize_line(await call_model(client, "character_b", task, state["premise"]))
@@ -188,34 +236,72 @@ async def character_b(state: StageState) -> StageState:
 async def writer(state: StageState) -> StageState:
     client = build_client()
     history_text = "\n".join(state.get("dialogue_history", []))
+    revision_note = ""
+    if state.get("revision_count", 0) > 0 and state.get("audit"):
+        revision_note = (
+            "\n\n이전 감수에서 아래와 같은 수정 요청이 왔습니다."
+            " 반드시 약점 보완에 집중해 초안을 다시 쓰세요.\n"
+            f"감수 의견:\n{state['audit']}"
+        )
     task = (
         "위 메모와 대화를 바탕으로 한국어 장면 초안을 작성하세요.\n"
-        "분량은 대략 500~800자로 하며, 대사를 충분히 살리고 서술도 자연스럽게 이어 주세요.\n"
-        "K-팝 데몬 헌터라는 현재 전제는 유지하고, 두 리더 사이의 긴장과 팀 전체의 부담이 동시에 느껴지게 쓰세요.\n\n"
+        "분량은 대략 500~900자로 하며, 대사를 충분히 살리고 서술도 자연스럽게 이어 주세요.\n"
+        "K-팝 데몬 헌터라는 현재 전제는 유지하고, 두 리더 사이의 긴장과 팀 전체의 부담이 동시에 느껴지게 쓰세요.\n"
+        "특히 반복적인 말주고받기만 늘어놓지 말고, 감정 변화나 상황 압박이 한 단계 더 움직이는 장면으로 만드세요.\n\n"
         f"매니저 메모:\n{state['manager_notes']}\n\n"
         f"연출 메모:\n{state['director_notes']}\n\n"
         f"대화 기록:\n{history_text}"
+        f"{revision_note}"
     )
     draft = await call_model(client, "writer", task, state["premise"])
     next_node = "auditor"
-    print(f"[writer] next_node={next_node}")
+    print(f"[writer] revision_count={state.get('revision_count', 0)} next_node={next_node}")
     return {"draft": draft, "next_node": next_node}
 
 
 async def auditor(state: StageState) -> StageState:
     client = build_client()
+    max_revisions = state.get("max_revisions", 1)
+    revision_count = state.get("revision_count", 0)
     task = (
-        "초안을 한국어로 검토하세요. 아래 형식의 불릿 3개로만 답하세요.\n"
-        "- 잘 작동하는 점\n"
-        "- 다소 약한 점\n"
-        "- 다음 개선 1가지\n\n"
-        "평가는 초보자도 이해하기 쉽게 쓰고, 모호한 칭찬 대신 장면의 밀도와 대사 흐름을 기준으로 구체적으로 말하세요.\n\n"
+        "초안을 한국어로 감수하세요. 반드시 아래 형식을 그대로 지키세요.\n"
+        "판정: 통과 또는 수정 필요\n"
+        "되돌아갈_노드: manager 또는 writer 또는 end\n"
+        "강점: 한 줄\n"
+        "약한_지점: 한 줄\n"
+        "보강_포인트: 한 줄\n"
+        "수정_지시: 한 줄\n\n"
+        "규칙:\n"
+        "- 강점은 실제로 잘 된 한 가지를 구체적으로 말하세요.\n"
+        "- 약한_지점은 무엇이 부족한지 분명히 지적하세요.\n"
+        "- 보강_포인트는 무엇을 더 세게 밀어야 하는지 적으세요.\n"
+        "- 수정_지시는 어느 노드가 다시 일해야 하는지 드러나게 쓰세요.\n"
+        "- 전제가 유지되고 긴장과 변화가 충분하면 통과를 주세요. 그렇지 않으면 수정 필요를 주세요.\n"
+        f"- 이미 {revision_count}번 수정했습니다. 최대 수정 횟수는 {max_revisions}번입니다. 마지막 허용 수정 이후라면 통과 쪽으로 마무리하지 말고, 판정은 자유롭게 하되 되돌아갈_노드는 end로 지정하세요.\n\n"
         f"초안:\n{state['draft']}"
     )
     audit = await call_model(client, "auditor", task, state["premise"])
-    next_node = "end"
-    print(f"[auditor] next_node={next_node}")
-    return {"audit": audit, "next_node": next_node}
+    audit_status, audit_target = parse_audit_result(audit)
+
+    if audit_status == "revise" and revision_count < max_revisions:
+        next_node = audit_target if audit_target in {"manager", "writer"} else "writer"
+        new_revision_count = revision_count + 1
+    else:
+        next_node = "end"
+        new_revision_count = revision_count
+        audit_target = "end"
+
+    print(
+        "[auditor] "
+        f"status={audit_status} target={audit_target} revision_count={new_revision_count} next_node={next_node}"
+    )
+    return {
+        "audit": audit,
+        "audit_status": audit_status,
+        "audit_target": audit_target,
+        "revision_count": new_revision_count,
+        "next_node": next_node,
+    }
 
 
 def route(state: StageState) -> NodeName:
@@ -248,6 +334,7 @@ def build_graph():
         "director",
         route,
         {
+            "manager": "manager",
             "character_a": "character_a",
             "character_b": "character_b",
             "writer": "writer",
@@ -259,6 +346,7 @@ def build_graph():
         "character_a",
         route,
         {
+            "manager": "manager",
             "character_a": "character_a",
             "character_b": "character_b",
             "writer": "writer",
@@ -270,6 +358,7 @@ def build_graph():
         "character_b",
         route,
         {
+            "manager": "manager",
             "character_a": "character_a",
             "character_b": "character_b",
             "writer": "writer",
@@ -277,8 +366,16 @@ def build_graph():
             "end": END,
         },
     )
-    graph.add_conditional_edges("writer", route, {"auditor": "auditor", "end": END})
-    graph.add_conditional_edges("auditor", route, {"end": END})
+    graph.add_conditional_edges(
+        "writer",
+        route,
+        {"manager": "manager", "writer": "writer", "auditor": "auditor", "end": END},
+    )
+    graph.add_conditional_edges(
+        "auditor",
+        route,
+        {"manager": "manager", "writer": "writer", "end": END},
+    )
 
     return graph.compile()
 
@@ -289,6 +386,8 @@ async def run_demo(premise: str) -> StageState:
         "premise": premise,
         "dialogue_history": [],
         "turns": 0,
+        "revision_count": 0,
+        "max_revisions": 1,
         "next_node": "manager",
     }
     return await app.ainvoke(initial_state)
@@ -308,6 +407,10 @@ def print_result(state: StageState) -> None:
     print(state.get("draft", ""))
     print("\n=== 감수 의견 ===")
     print(state.get("audit", ""))
+    print("\n=== 감수 요약 ===")
+    print(f"판정: {AUDIT_STATUS_LABELS.get(state.get('audit_status', 'pass'), state.get('audit_status', 'pass'))}")
+    print(f"되돌아간 노드: {state.get('audit_target', 'end')}")
+    print(f"수정 라운드 수: {state.get('revision_count', 0)}")
 
 
 async def main() -> None:
