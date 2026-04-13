@@ -1,78 +1,81 @@
-# langgraph-novel-lab
+# langgraph-stage-play-lab
 
-A minimal LangGraph starter repo for experimenting with a multi-agent novel-writing workflow.
+Minimal educational LangGraph demo for a multi-agent stage play.
 
-## What this is
+## What this project shows
 
-This project shows a tiny educational pipeline where several agents collaborate on one short fiction scene:
+- A state-driven graph (not a fixed `A -> B -> writer` chain)
+- Dynamic routing by `manager` using current state
+- Turn-based character interaction (`character_a`, `character_b`)
+- Final drafting and audit pass
 
-- `manager` plans the story
-- `director` shapes the scene
-- `character_a` and `character_b` add viewpoint-specific notes
-- `writer` drafts the scene
-- `auditor` reviews the result
+## State shape
 
-It is intentionally simple so you can learn the flow, modify prompts, and swap in your own local OpenAI-compatible model provider.
+The graph state keeps:
 
-## Architecture overview
+- `premise`
+- `scene_notes`
+- `dialogue_history`
+- `draft`
+- `audit`
+- `next_node`
+
+## Graph flow (dynamic)
 
 ```text
-manager -> director
-             |- character_a ->
-             |- character_b -> writer -> auditor -> END
+manager --(next_node)--> director | character_a | character_b | writer | auditor | END
+director   -> manager
+character_a-> manager
+character_b-> manager
+writer     -> manager
+auditor    -> manager
 ```
 
-State is passed through a LangGraph `StateGraph`. Each node calls the same chat-completions API with a different role prompt.
+`manager` inspects state and decides the next node:
+
+- no `scene_notes` yet -> `director`
+- dialogue turns not enough -> alternate `character_a` / `character_b`
+- dialogue done, no `draft` -> `writer`
+- no `audit` -> `auditor`
+- otherwise -> `END`
 
 ## Project structure
 
 ```text
-langgraph-novel-lab/
+langgraph-stage-play-lab/
 ├─ src/
 │  └─ langgraph_novel_lab/
 │     ├─ __init__.py
 │     └─ main.py
+├─ notebooks/
+│  └─ demo.ipynb
 ├─ .env.example
 ├─ .gitignore
 ├─ README.md
 └─ requirements.txt
 ```
 
-## Setup
+## Setup (venv)
 
 ### macOS / Linux
-
-Create and activate a virtual environment:
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-```
-
-Install dependencies:
-
-```bash
 pip install -r requirements.txt
 ```
 
 ### Windows (PowerShell)
 
-Create and activate a virtual environment:
-
 ```powershell
 py -m venv .venv
 .\.venv\Scripts\Activate.ps1
-```
-
-Install dependencies:
-
-```powershell
 pip install -r requirements.txt
 ```
 
-## Configure `.env`
+## Configure `.env` (local OpenAI-compatible provider)
 
-Copy the example file and edit it:
+Copy and edit:
 
 ### macOS / Linux
 
@@ -86,40 +89,44 @@ cp .env.example .env
 Copy-Item .env.example .env
 ```
 
-For OpenAI Cloud, set:
+Required values:
 
-- `OPENAI_API_KEY` — your OpenAI API key
-- `OPENAI_MODEL` — for example `gpt-4o-mini`
-- `NOVEL_PREMISE` — optional custom premise for the demo
+- `OPENAI_BASE_URL` (example: `http://localhost:1234/v1`)
+- `OPENAI_API_KEY`
+- `OPENAI_MODEL`
 
-Leave `OPENAI_BASE_URL` unset for OpenAI Cloud.
+Optional values:
 
-If you want to use a custom OpenAI-compatible provider instead, set:
+- `STAGE_PREMISE`
+- `TARGET_DIALOGUE_TURNS` (default: `6`)
 
-- `OPENAI_BASE_URL` — API base URL, for example `http://localhost:1234/v1`
-- `OPENAI_API_KEY` — any key your local provider expects
-- `OPENAI_MODEL` — model name exposed by that provider
-
-Examples of compatible local providers include LM Studio, Ollama bridges that expose an OpenAI-style endpoint, and vLLM-based local servers.
-
-## Run the sample
+## Run from terminal
 
 ```bash
 python -m src.langgraph_novel_lab.main
 ```
 
-On Windows:
+This prints:
 
-```powershell
-py -m src.langgraph_novel_lab.main
+- manager routing logs
+- scene notes
+- dialogue history
+- scene draft
+- audit summary
+
+## Run from notebook
+
+Open `notebooks/demo.ipynb` and run cells in order.
+
+The notebook already includes project-root path setup and async invocation with:
+
+```python
+result = await app.ainvoke({"premise": premise, "dialogue_history": []})
 ```
 
-You should see the generated planning notes, character notes, draft scene, and audit output in the terminal.
+## Extend ideas
 
-## Publish to GitHub
-
-This repo is initialized locally and ready to publish. If `gh` is authenticated, you can create a public repo with:
-
-```bash
-gh repo create langgraph-novel-lab --public --source=. --remote=origin --push
-```
+- add more characters
+- add retry/revision loop after `auditor`
+- let manager use an LLM policy instead of deterministic rules
+- store structured dialogue turns (dicts instead of strings)
