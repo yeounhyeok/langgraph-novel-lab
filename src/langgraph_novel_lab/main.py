@@ -586,7 +586,7 @@ async def run_demo(premise: str) -> StageState:
         "dialogue_history": [],
         "turns": 0,
         "revision_count": 0,
-        "max_revisions": 1,
+        "max_revisions": 5,
         "next_node": "manager",
     }
     started = perf_counter()
@@ -629,7 +629,11 @@ async def main() -> None:
     load_dotenv()
     premise = os.getenv(
         "NOVEL_PREMISE",
-        "낮에는 화려한 K-팝 아이돌 그룹 '루미너스'로 활동하지만, 밤에는 음악의 주파수로 도시를 잠식하는 악령들을 사냥하는 데몬 헌터들의 사투와 두 리더의 갈등.",
+        "화려한 케이팝 걸그룹 '헌트릭스(HUNTR/X)' 멤버들이 밤에는 세상을 위협하는 악령을 물리치는 데몬 헌터로 변신하는 판타지 액션물입니다. 3인조 걸그룹 루미, 미라, 조이가 노래와 퍼포먼스, 한국 전통 무기를 활용해 악귀를 퇴치하는 이중생활을 그립니다. 핵심 설정 및 시놉시스"
+        "이중생활: 낮에는 세계적인 슈퍼스타 케이팝 걸그룹, 밤에는 악마를 사냥하여 인간 세상을 지키는 헌터.",
+        "전투 방식: 헌트릭스는 악령들을 물리치고 이들을 봉인하는 '황금 혼문(魂門)'을 만들기 위해 노래와 춤을 무기로 사용.",
+        "대립 구조: 팬들의 영혼을 빼앗으려는 라이벌 악령 보이 그룹 '사자 보이즈(Saja Boys)'와 대결.",
+        "한국적 요세: 멤버들은 각각 사인검, 월도, 신카이 등 한국 전통 무기를 개성 있게 사용.",
     )
     result = await run_demo(premise)
     print_result(result)
